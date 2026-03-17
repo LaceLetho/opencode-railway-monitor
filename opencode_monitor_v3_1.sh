@@ -10,8 +10,8 @@ CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-60}
 MEMORY_THRESHOLD_MB=${MEMORY_THRESHOLD_MB:-5000}
 CPU_THRESHOLD_PERCENT=${CPU_THRESHOLD_PERCENT:-5.0}
 GENERATION_GRACE_SECONDS=${GENERATION_GRACE_SECONDS:-60}
-LOG_FILE="${LOG_FILE:-/data/.local/share/opencode/auto_restart_v3.log}"
-STATE_DIR="/data/.local/share/opencode/monitor_state_v3"
+LOG_FILE="${LOG_FILE:-/tmp/opencode_monitor_script.log}"
+STATE_DIR="/tmp/opencode_monitor_state_v3"
 mkdir -p "$STATE_DIR"
 
 LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
