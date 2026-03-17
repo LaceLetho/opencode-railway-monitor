@@ -1,13 +1,13 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v3.1
-# 改进：1. 去掉线程数检测  2. 查询所有 session
+# OpenCode Railway 智能监测 - v3.2
+# 改进：1. 去掉线程数检测  2. 查询所有 session  3. 详细记录活跃session  4. 每分钟检查一次
 
 set -euo pipefail
 
 # ==================== 配置 ====================
 IDLE_TIME_MINUTES=${IDLE_TIME_MINUTES:-10}
-CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-30}
-MEMORY_THRESHOLD_MB=${MEMORY_THRESHOLD_MB:-2000}
+CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-60}
+MEMORY_THRESHOLD_MB=${MEMORY_THRESHOLD_MB:-5000}
 CPU_THRESHOLD_PERCENT=${CPU_THRESHOLD_PERCENT:-5.0}
 GENERATION_GRACE_SECONDS=${GENERATION_GRACE_SECONDS:-60}
 LOG_FILE="${LOG_FILE:-/data/.local/share/opencode/auto_restart_v3.log}"
@@ -18,7 +18,7 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 
 echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v3.1"
+echo "🚂 OpenCode Railway 智能监测 v3.2"
 echo "========================================"
 echo ""
 echo "改进:"
@@ -30,6 +30,8 @@ echo "配置:"
 echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
 echo "  内存阈值: ${MEMORY_THRESHOLD_MB} MB"
 echo "  CPU阈值: ${CPU_THRESHOLD_PERCENT}%"
+echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒 (约${CHECK_INTERVAL_SECONDS}秒)"
+echo "  日志文件: ${LOG_FILE}"
 echo "========================================"
 
 log() {
@@ -54,6 +56,7 @@ are_all_sessions_idle() {
     local threshold=$((IDLE_TIME_MINUTES * 60 * 1000))
     local active_count=0
     local total_count=0
+    local active_sessions_info=""
     
     while IFS= read -r session_id; do
         [ -z "$session_id" ] && continue
@@ -62,18 +65,28 @@ are_all_sessions_idle() {
         local detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null)
         if [ -n "$detail" ]; then
             local updated=$(echo "$detail" | grep -o '"updated":[0-9]*' | head -1 | cut -d':' -f2)
+            local title=$(echo "$detail" | grep -o '"title":"[^"]*"' | head -1 | cut -d'"' -f4)
+            local directory=$(echo "$detail" | grep -o '"directory":"[^"]*"' | head -1 | cut -d'"' -f4)
             
             if [ -n "$updated" ]; then
                 local time_diff=$((current_time - updated))
+                local time_diff_sec=$((time_diff / 1000))
                 # 如果在阈值内有更新，认为是活跃的
                 if [ "$time_diff" -lt "$threshold" ]; then
                     active_count=$((active_count + 1))
+                    # 记录活跃 session 的信息
+                    active_sessions_info="${active_sessions_info}${session_id: -8}|${time_diff_sec}s|${title}|${directory}; "
                 fi
             fi
         fi
     done <<< "$sessions"
     
     log "  Session统计: 总共${total_count}个, 活跃${active_count}个"
+    
+    # 如果有活跃的 session，记录详细信息
+    if [ -n "$active_sessions_info" ]; then
+        log "  🔴 活跃Session详情: ${active_sessions_info}"
+    fi
     
     # 如果有活跃的 session，返回 false（不空闲）
     if [ "$active_count" -gt 0 ]; then
@@ -212,7 +225,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v3.1"
+    log "🚀 监测服务启动 v3.2"
     
     local start_time=$(date +%s)
     local consecutive_checks=0
@@ -237,8 +250,8 @@ main() {
         local uptime=$(($(date +%s) - start_time))
         local uptime_hours=$((uptime / 3600))
         
-        # 显示所有 session 状态
-        if [ $((check_count % 10)) -eq 1 ]; then
+        # 显示所有 session 状态（每5次检查显示一次，即每5分钟）
+        if [ $((check_count % 5)) -eq 1 ]; then
             log "⏱️ ${uptime_hours}h | 内存:${current_mem}MB"
             are_all_sessions_idle  # 这会输出 session 统计
         fi
