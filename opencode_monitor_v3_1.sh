@@ -60,14 +60,43 @@ get_recent_session_ids() {
         echo ""
         return
     fi
-    # 调试：记录原始响应中的session数量
+    
+    # 调试：记录原始响应
     local session_count=$(echo "$response" | grep -o '"id":"ses_' | wc -l)
     echo "DEBUG: API returned ${session_count} sessions" >&2
-    # 提取 id 和 updated，按 updated 排序，取所有（不只10个，防止活跃session不在前10）
-    # 格式: ses_id|timestamp
-    echo "$response" | grep -o '"id":"ses_[^"]*"[^}]*"updated":[0-9]*' 2>/dev/null | \
-        sed 's/.*"id":"\([^"]*\)".*"updated":\([0-9]*\).*/\1|\2/' | \
-        sort -t'|' -k2 -rn | cut -d'|' -f1 || true
+    
+    # 方法1: 如果 jq 可用，使用 jq 解析（最可靠）
+    if command -v jq >/dev/null 2>&1; then
+        echo "$response" | jq -r '.[] | "\(.id)|\(.updated)"' 2>/dev/null | \
+            sort -t'|' -k2 -rn | cut -d'|' -f1
+        return
+    fi
+    
+    # 方法2: 使用 Python（如果可用）
+    if command -v python3 >/dev/null 2>&1; then
+        echo "$response" | python3 -c '
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    sessions = [(s.get("id", ""), s.get("updated", 0)) for s in data if s.get("id", "").startswith("ses_")]
+    sessions.sort(key=lambda x: x[1], reverse=True)
+    for sid, _ in sessions:
+        print(sid)
+except:
+    pass
+' 2>/dev/null
+        return
+    fi
+    
+    # 方法3: 改进的 sed/awk 方法 - 逐条解析每个 session 对象
+    # 假设响应是一个 JSON 数组，提取每个 {"id":"ses_...","updated":...} 对象
+    echo "$response" | tr '{}' '\n' | grep '"id":"ses_' | while read -r line; do
+        sid=$(echo "$line" | grep -o '"id":"ses_[^"]*"' | head -1 | sed 's/.*"id":"\([^"]*\)".*/\1/')
+        updated=$(echo "$line" | grep -o '"updated":[0-9]*' | head -1 | sed 's/.*"updated":\([0-9]*\).*/\1/')
+        if [ -n "$sid" ] && [ -n "$updated" ]; then
+            echo "${sid}|${updated}"
+        fi
+    done | sort -t'|' -k2 -rn | cut -d'|' -f1 || true
 }
 
 # ==================== 检查最近10个 Session 是否都空闲 ====================
