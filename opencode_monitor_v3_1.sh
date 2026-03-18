@@ -1,8 +1,10 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v3.5
-# 改进：1. 去掉线程数检测  2. 查询最近10个 session（优化性能） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时
+# OpenCode Railway 智能监测 - v3.6
+# 改进：1. 去掉线程数检测  2. 查询最近10个 session（优化性能） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时 7. 移除set -e防止意外退出
 
-set -euo pipefail
+set -uo pipefail
+# 注意：不使用 set -e，因为监控脚本不应该因为任何命令失败就退出
+# 而是应该继续运行，记录错误
 
 # 当 stdin 被关闭时（如 server.js 中使用 stdio: ["ignore", ...]），
 # 需要将 stdin 重定向到 /dev/null，否则 read 命令会失败
@@ -22,7 +24,7 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 
 echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v3.5"
+echo "🚂 OpenCode Railway 智能监测 v3.6"
 echo "========================================"
 echo ""
 echo "改进:"
@@ -270,7 +272,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v3.5"
+    log "🚀 监测服务启动 v3.6"
     
     local start_time
     start_time=$(date +%s)
