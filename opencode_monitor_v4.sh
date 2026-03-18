@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v4.0 (Hybrid: SSE + Polling)
-# 改进：1. 使用SSE事件流作为主检测器 2. 轮询作为备用 3. 实时检测 4. 无会话数量限制
+# OpenCode Railway 智能监测 - v4.0 (SSE Only)
+# 改进：使用SSE事件流作为唯一检测器
 
 set -uo pipefail
 
@@ -27,9 +27,6 @@ echo "========================================"
 echo ""
 echo "重大改进:"
 echo "  ✓ 使用SSE事件流 - 实时检测活动"
-echo "  ✓ 轮询作为备用 - 双重保障"
-echo "  ✓ 无会话数量限制 - 检测所有活动"
-echo "  ✓ 混合架构 - 可靠且高效"
 echo ""
 echo "配置:"
 echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
@@ -93,70 +90,7 @@ stop_event_monitor() {
     fi
 }
 
-# ==================== 方法2: 轮询检测（备用） ====================
-get_recent_session_ids() {
-    local response
-    response=$(curl -s --max-time 5 "${API_URL}/session" 2>/dev/null || echo "")
-    if [ -z "$response" ]; then
-        echo ""
-        return
-    fi
-    
-    # 使用jq或Python解析JSON
-    if command -v jq >/dev/null 2>&1; then
-        echo "$response" | jq -r '.[].id'
-    elif command -v python3 >/dev/null 2>&1; then
-        echo "$response" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(s['id']) for s in d]"
-    else
-        # 备用方法
-        echo "$response" | grep -o '"id":"ses_[^"]*"' | sed 's/.*"id":"\([^"]*\)".*/\1/'
-    fi
-}
-
-are_all_sessions_idle() {
-    local sessions
-    sessions=$(get_recent_session_ids)
-    local current_time
-    current_time=$(date +%s)000
-    local threshold=$((IDLE_TIME_MINUTES * 60 * 1000))
-    local active_count=0
-    local total_count=0
-    
-    while IFS= read -r session_id; do
-        [ -z "$session_id" ] && continue
-        total_count=$((total_count + 1))
-        
-        # 获取会话详情
-        local detail
-        detail=$(curl -s --max-time 5 "${API_URL}/session/$session_id" 2>/dev/null || echo "")
-        
-        if [ -n "$detail" ]; then
-            local updated
-            if command -v jq >/dev/null 2>&1; then
-                updated=$(echo "$detail" | jq -r '.updated // 0')
-            else
-                updated=$(echo "$detail" | grep -o '"updated":[0-9]*' | head -1 | cut -d':' -f2 || echo "0")
-            fi
-            
-            if [ -n "$updated" ] && [ "$updated" != "0" ]; then
-                local time_diff=$((current_time - updated))
-                if [ "$time_diff" -lt "$threshold" ]; then
-                    active_count=$((active_count + 1))
-                fi
-            fi
-        fi
-    done <<< "$sessions"
-    
-    log "  [POLL] Session统计: 总共${total_count}个, 活跃${active_count}个"
-    
-    if [ "$active_count" -gt 0 ]; then
-        return 1  # 不空闲
-    else
-        return 0  # 全部空闲
-    fi
-}
-
-# ==================== 统一活动检测 ====================
+# ==================== 活动检测 ====================
 is_generating_content() {
     local pid
     pid=$(get_opencode_pid)
@@ -289,7 +223,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v4.0 (SSE + 轮询混合模式)"
+    log "🚀 监测服务启动 v4.0 (SSE 模式)"
     
     local start_time
     start_time=$(date +%s)
@@ -328,15 +262,12 @@ main() {
         if [ $((check_count % 5)) -eq 1 ]; then
             log "⏱️ ${uptime_hours}h | 内存:${current_mem}MB"
             
-            # 备用检测：轮询session
             if [ -f "$LAST_ACTIVITY_FILE" ]; then
                 local last_activity=$(cat "$LAST_ACTIVITY_FILE")
                 local current=$(date +%s)
                 local time_diff=$((current - last_activity))
                 log "  [SSE] 最后活动: ${time_diff}s 前"
             fi
-            
-            are_all_sessions_idle || true
         fi
         
         # 检查生成状态
