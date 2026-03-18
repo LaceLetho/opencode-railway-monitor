@@ -145,7 +145,11 @@ is_generating_content() {
     # 检测 3: 高 CPU（去掉线程数检测）
     local cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
     # 使用 awk 进行浮点数比较，bc 可能不可用
-    local cpu_high=$(awk "BEGIN {exit !($cpu > 25.0)}")
+    # 注意：awk exit 会返回状态码，需要用 || true 避免 set -e 退出
+    local cpu_high=1
+    if awk "BEGIN {exit !($cpu > 25.0)}" 2>/dev/null; then
+        cpu_high=0
+    fi
     if [ "$cpu_high" -eq 0 ]; then
         is_generating=1
         reasons="${reasons}高CPU(${cpu}%) "
