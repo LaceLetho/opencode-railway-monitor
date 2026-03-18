@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v3.3
-# 改进：1. 去掉线程数检测  2. 查询所有 session  3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃
+# OpenCode Railway 智能监测 - v3.5
+# 改进：1. 去掉线程数检测  2. 查询最近10个 session（优化性能） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时
 
 set -euo pipefail
 
@@ -22,14 +22,15 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 
 echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v3.3"
+echo "🚂 OpenCode Railway 智能监测 v3.5"
 echo "========================================"
 echo ""
 echo "改进:"
 echo "  ✓ 去掉线程数检测（MCP 可能一直开着）"
-echo "  ✓ 查询所有 session，不只是最新的"
+echo "  ✓ 查询最近10个 session（优化性能）"
 echo "  ✓ 更准确的空闲判断"
 echo "  ✓ 修复 pipefail 导致的崩溃"
+echo "  ✓ 添加 curl 超时防止卡住"
 echo ""
 echo "配置:"
 echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
@@ -49,22 +50,25 @@ get_opencode_pid() {
     pgrep -f "opencode web" | head -1 || echo ""
 }
 
-# ==================== 获取所有 Session ID ====================
-get_all_session_ids() {
+# ==================== 获取最近10个 Session ID (按updated排序) ====================
+get_recent_session_ids() {
     local response
     response=$(curl -s --max-time 5 http://127.0.0.1:18080/session 2>/dev/null || echo "")
     if [ -z "$response" ]; then
         echo ""
         return
     fi
-    # 使用 || true 防止 grep 无匹配时返回非零退出码导致脚本退出
-    echo "$response" | grep -o '"id":"ses_[^"]*"' 2>/dev/null | cut -d'"' -f4 || true
+    # 提取 id 和 updated，按 updated 排序，取最近的10个
+    # 格式: ses_id|timestamp
+    echo "$response" | grep -o '"id":"ses_[^"]*"[^}]*"updated":[0-9]*' 2>/dev/null | \
+        sed 's/.*"id":"\([^"]*\)".*"updated":\([0-9]*\).*/\1|\2/' | \
+        sort -t'|' -k2 -rn | head -10 | cut -d'|' -f1 || true
 }
 
-# ==================== 检查所有 Session 是否都空闲 ====================
+# ==================== 检查最近10个 Session 是否都空闲 ====================
 are_all_sessions_idle() {
     local sessions
-    sessions=$(get_all_session_ids)
+    sessions=$(get_recent_session_ids)
     local current_time
     current_time=$(date +%s)000
     local threshold=$((IDLE_TIME_MINUTES * 60 * 1000))
@@ -100,7 +104,7 @@ are_all_sessions_idle() {
         fi
     done <<< "$sessions"
     
-    log "  Session统计: 总共${total_count}个, 活跃${active_count}个"
+    log "  Session统计(最近10个): 总共${total_count}个, 活跃${active_count}个"
     
     # 如果有活跃的 session，记录详细信息
     if [ -n "$active_sessions_info" ]; then
@@ -124,9 +128,9 @@ is_generating_content() {
     local is_generating=0
     local reasons=""
     
-    # 检测 1: 检查所有 session 的活跃状态
+    # 检测 1: 检查最近10个 session 的活跃状态
     local sessions
-    sessions=$(get_all_session_ids)
+    sessions=$(get_recent_session_ids)
     local current_time
     current_time=$(date +%s)000
     
@@ -266,7 +270,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v3.3"
+    log "🚀 监测服务启动 v3.5"
     
     local start_time
     start_time=$(date +%s)
