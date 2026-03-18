@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenCode Railway 智能监测 - v3.6
-# 改进：1. 去掉线程数检测  2. 查询最近10个 session（优化性能） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时 7. 移除set -e防止意外退出
+# 改进：1. 去掉线程数检测  2. 查询所有 session（不只10个，防止活跃session被遗漏） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时 7. 移除set -e防止意外退出
 
 set -uo pipefail
 # 注意：不使用 set -e，因为监控脚本不应该因为任何命令失败就退出
@@ -29,7 +29,7 @@ echo "========================================"
 echo ""
 echo "改进:"
 echo "  ✓ 去掉线程数检测（MCP 可能一直开着）"
-echo "  ✓ 查询最近10个 session（优化性能）"
+echo "  ✓ 查询所有 session（不只10个，防止活跃session被遗漏）"
 echo "  ✓ 更准确的空闲判断"
 echo "  ✓ 修复 pipefail 导致的崩溃"
 echo "  ✓ 添加 curl 超时防止卡住"
@@ -52,7 +52,7 @@ get_opencode_pid() {
     pgrep -f "opencode web" | head -1 || echo ""
 }
 
-# ==================== 获取最近10个 Session ID (按updated排序) ====================
+# ==================== 获取所有 Session ID (按updated排序) ====================
 get_recent_session_ids() {
     local response
     response=$(curl -s --max-time 5 http://127.0.0.1:18080/session 2>/dev/null || echo "")
@@ -60,11 +60,11 @@ get_recent_session_ids() {
         echo ""
         return
     fi
-    # 提取 id 和 updated，按 updated 排序，取最近的10个
+    # 提取 id 和 updated，按 updated 排序，取所有（不只10个，防止活跃session不在前10）
     # 格式: ses_id|timestamp
     echo "$response" | grep -o '"id":"ses_[^"]*"[^}]*"updated":[0-9]*' 2>/dev/null | \
         sed 's/.*"id":"\([^"]*\)".*"updated":\([0-9]*\).*/\1|\2/' | \
-        sort -t'|' -k2 -rn | head -10 | cut -d'|' -f1 || true
+        sort -t'|' -k2 -rn | cut -d'|' -f1 || true
 }
 
 # ==================== 检查最近10个 Session 是否都空闲 ====================
@@ -112,7 +112,7 @@ are_all_sessions_idle() {
         fi
     done <<< "$sessions"
     
-    log "  Session统计(最近10个): 总共${total_count}个, 活跃${active_count}个"
+    log "  Session统计(所有): 总共${total_count}个, 活跃${active_count}个"
     
     # 如果有活跃的 session，记录详细信息
     if [ -n "$active_sessions_info" ]; then
