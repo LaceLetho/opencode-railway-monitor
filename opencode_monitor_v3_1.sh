@@ -60,6 +60,9 @@ get_recent_session_ids() {
         echo ""
         return
     fi
+    # 调试：记录原始响应中的session数量
+    local session_count=$(echo "$response" | grep -o '"id":"ses_' | wc -l)
+    echo "DEBUG: API returned ${session_count} sessions" >&2
     # 提取 id 和 updated，按 updated 排序，取所有（不只10个，防止活跃session不在前10）
     # 格式: ses_id|timestamp
     echo "$response" | grep -o '"id":"ses_[^"]*"[^}]*"updated":[0-9]*' 2>/dev/null | \
