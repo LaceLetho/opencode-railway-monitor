@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# 当 stdin 被关闭时（如 server.js 中使用 stdio: ["ignore", ...]），
+# 需要将 stdin 重定向到 /dev/null，否则 read 命令会失败
+exec < /dev/null
+
 # ==================== 配置 ====================
 IDLE_TIME_MINUTES=${IDLE_TIME_MINUTES:-10}
 CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-60}
