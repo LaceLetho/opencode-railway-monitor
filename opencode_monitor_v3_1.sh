@@ -271,22 +271,21 @@ main() {
             continue
         fi
         
-        # 检查内存
-        if [ "$current_mem" -gt "$MEMORY_THRESHOLD_MB" ]; then
-            log "⚠️ 内存超限: ${current_mem}MB"
-            restart_opencode "内存超限"
-        fi
-        
         # 检查所有 session 是否都空闲
         if are_all_sessions_idle; then
             consecutive_checks=$((consecutive_checks + 1))
             local idle_min=$((consecutive_checks * CHECK_INTERVAL_SECONDS / 60))
             
-            if [ $idle_min -ge $IDLE_TIME_MINUTES ]; then
-                log "💤 所有 Session 空闲 ${IDLE_TIME_MINUTES} 分钟，执行重启"
-                restart_opencode "空闲超时"
+            # 只有所有 session 空闲 AND 内存超过 2GB 时才重启
+            if [ $idle_min -ge $IDLE_TIME_MINUTES ] && [ "$current_mem" -gt 2000 ]; then
+                log "💤 所有 Session 空闲 ${IDLE_TIME_MINUTES} 分钟 且 内存占用 ${current_mem}MB > 2GB，执行重启"
+                restart_opencode "空闲且高内存"
             elif [ $((check_count % 5)) -eq 0 ]; then
-                log "  🟢 全部空闲 (${idle_min}/${IDLE_TIME_MINUTES} 分钟)"
+                if [ "$current_mem" -gt 2000 ]; then
+                    log "  🟢 全部空闲 (${idle_min}/${IDLE_TIME_MINUTES} 分钟), 内存: ${current_mem}MB (已超2GB)"
+                else
+                    log "  🟢 全部空闲 (${idle_min}/${IDLE_TIME_MINUTES} 分钟), 内存: ${current_mem}MB"
+                fi
             fi
         else
             consecutive_checks=0
