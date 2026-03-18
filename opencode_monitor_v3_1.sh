@@ -302,7 +302,7 @@ main() {
         # 显示所有 session 状态（每5次检查显示一次，即每5分钟）
         if [ $((check_count % 5)) -eq 1 ]; then
             log "⏱️ ${uptime_hours}h | 内存:${current_mem}MB"
-            are_all_sessions_idle  # 这会输出 session 统计
+            are_all_sessions_idle || true  # 这会输出 session 统计，返回码1表示不空闲，不能导致脚本退出
         fi
         
         # 检查生成状态
