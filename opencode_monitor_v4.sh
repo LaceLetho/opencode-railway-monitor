@@ -60,10 +60,14 @@ start_event_monitor() {
             
             # 连接到SSE端点，捕获活动事件
             curl -N -s "${API_URL}/event" 2>/dev/null | while read -r line; do
-                # 检测任何活动事件
-                if echo "$line" | grep -qE "event:|data:"; then
-                    # 有活动！更新时间戳
-                    date +%s > "$LAST_ACTIVITY_FILE"
+                # 只检测真正的用户活动事件，过滤系统心跳
+                if echo "$line" | grep -qE "data:"; then
+                    # 过滤掉系统心跳和连接事件
+                    if ! echo "$line" | grep -qE '"type":"server\.(heartbeat|connected)"'; then
+                        # 有真正的活动！更新时间戳
+                        date +%s > "$LAST_ACTIVITY_FILE"
+                        log "  [SSE] 用户活动: $line"
+                    fi
                 fi
             done
             
