@@ -52,7 +52,7 @@ get_opencode_pid() {
 # ==================== 获取所有 Session ID ====================
 get_all_session_ids() {
     local response
-    response=$(curl -s http://127.0.0.1:18080/session 2>/dev/null || echo "")
+    response=$(curl -s --max-time 5 http://127.0.0.1:18080/session 2>/dev/null || echo "")
     if [ -z "$response" ]; then
         echo ""
         return
@@ -77,7 +77,7 @@ are_all_sessions_idle() {
         total_count=$((total_count + 1))
         
         local detail
-        detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
+        detail=$(curl -s --max-time 5 "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
         if [ -n "$detail" ]; then
             # 使用 || true 防止 grep 无匹配时返回非零退出码
             local updated
@@ -134,7 +134,7 @@ is_generating_content() {
         [ -z "$session_id" ] && continue
         
         local detail
-        detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
+        detail=$(curl -s --max-time 5 "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
         if [ -n "$detail" ]; then
             # 使用 || true 防止 grep 无匹配时返回非零退出码
             local updated
