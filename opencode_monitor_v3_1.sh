@@ -96,12 +96,18 @@ are_all_sessions_idle() {
             if [ -n "$updated" ]; then
                 local time_diff=$((current_time - updated))
                 local time_diff_sec=$((time_diff / 1000))
+                # 调试日志：显示时间计算
+                if [ $((check_count % 5)) -eq 1 ]; then
+                    log "    DEBUG: session=${session_id: -8} updated=${updated} current=${current_time} diff=${time_diff_sec}s threshold=$((threshold/1000))s"
+                fi
                 # 如果在阈值内有更新，认为是活跃的
                 if [ "$time_diff" -lt "$threshold" ]; then
                     active_count=$((active_count + 1))
                     # 记录活跃 session 的信息
                     active_sessions_info="${active_sessions_info}${session_id: -8}|${time_diff_sec}s|${title}|${directory}; "
                 fi
+            else
+                log "    DEBUG: session=${session_id: -8} has no updated field"
             fi
         fi
     done <<< "$sessions"
