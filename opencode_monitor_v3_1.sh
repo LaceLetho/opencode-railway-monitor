@@ -128,11 +128,11 @@ is_generating_content() {
     
     # 检测 2: 上下文切换速率
     if [ -f "/proc/$pid/status" ]; then
-        local current_ctx=$(grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}')
-        local prev_ctx=$(cat "$CONTEXT_SWITCH_FILE" 2>/dev/null || echo "0")
+        local current_ctx=$(grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}' | tr -d ' \n\t')
+        local prev_ctx=$(cat "$CONTEXT_SWITCH_FILE" 2>/dev/null | tr -d ' \n\t' || echo "0")
         echo "$current_ctx" > "$CONTEXT_SWITCH_FILE"
         
-        if [ "$prev_ctx" != "0" ]; then
+        if [ "$prev_ctx" != "0" ] && [ -n "$current_ctx" ] && [ -n "$prev_ctx" ]; then
             local ctx_diff=$((current_ctx - prev_ctx))
             if [ "$ctx_diff" -gt 100 ]; then
                 is_generating=1
@@ -234,7 +234,7 @@ main() {
     # 初始化
     local pid=$(get_opencode_pid)
     if [ -n "$pid" ] && [ -f "/proc/$pid/status" ]; then
-        grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}' > "$CONTEXT_SWITCH_FILE"
+        grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}' | tr -d ' \n\t' > "$CONTEXT_SWITCH_FILE"
     fi
     
     while true; do
