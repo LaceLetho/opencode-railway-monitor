@@ -97,20 +97,22 @@ curl http://127.0.0.1:18080/session/{session_id}
 
 ```
 .
-├── opencode_monitor_v3_1.sh       # ⭐ 智能监测主脚本（推荐）
-├── opencode_generation_monitor_v2.sh  # 生成状态检测工具
+├── opencode_monitor_v4.sh           # ⭐ 智能监测主脚本 v4.0（推荐）- SSE + 轮询混合模式
 ├── README.md                        # 本文档
 └── LICENSE                          # MIT 许可证
 ```
 
-### 主脚本：opencode_monitor_v3_1.sh
+### 主脚本：opencode_monitor_v4.sh
 
 **功能**：
-- 每 60 秒检查一次所有 Session 状态
-- 检测大模型是否正在生成内容
-- 详细记录每个活跃 Session 的信息
-- 内存超过阈值或空闲超时时自动重启
-- 优雅关闭 → 清理进程 → Railway 重新部署
+- 🔄 **SSE事件流监控** - 实时检测所有活动（无延迟）
+- 🔄 **轮询备用检测** - 双重保障，防止漏检
+- 🔄 **无会话数量限制** - 检测所有100+会话
+- 🔄 **每 60 秒检查一次系统状态**
+- 🔄 **检测大模型是否正在生成内容**
+- 🔄 **详细记录每个活跃 Session 的信息**
+- 🔄 **内存超过阈值或空闲超时时自动重启**
+- 🔄 **优雅关闭 → 清理进程 → Railway 重新部署**
 
 **配置参数**：
 ```bash
@@ -120,13 +122,6 @@ MEMORY_THRESHOLD_MB=5000      # 内存上限（MB），默认 5GB
 CPU_THRESHOLD_PERCENT=5.0     # CPU 空闲阈值（%）
 GENERATION_GRACE_SECONDS=60   # 生成后冷却期（秒）
 ```
-
-### 辅助脚本：opencode_generation_monitor_v2.sh
-
-**功能**：
-- 实时监测大模型生成状态
-- 显示所有 Session 的活动情况
-- 调试和观察使用
 
 ## 🚀 使用方法
 
@@ -141,14 +136,14 @@ cd opencode-railway-monitor
 
 ```bash
 # 方式 1：后台运行（推荐）
-nohup ./opencode_monitor_v3_1.sh > /tmp/opencode_monitor.log 2>&1 &
+nohup ./opencode_monitor_v4.sh > /tmp/opencode_monitor.log 2>&1 &
 echo $! > ~/.opencode_monitor.pid
 
 # 方式 2：前台运行（调试用）
-./opencode_monitor_v3_1.sh
+./opencode_monitor_v4.sh
 
 # 方式 3：自定义参数
-IDLE_TIME_MINUTES=15 MEMORY_THRESHOLD_MB=4000 ./opencode_monitor_v3_1.sh
+IDLE_TIME_MINUTES=15 MEMORY_THRESHOLD_MB=4000 ./opencode_monitor_v4.sh
 ```
 
 ### 3. 查看日志
@@ -168,7 +163,7 @@ cat /data/.local/share/opencode/auto_restart_v3.log
 kill $(cat ~/.opencode_monitor.pid) 2>/dev/null
 
 # 方式 2：直接查找进程
-pkill -f opencode_monitor_v3_1
+pkill -f opencode_monitor_v4
 ```
 
 ### 5. 使用 systemd 服务（长期运行）
@@ -183,7 +178,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/path/to/opencode-railway-monitor/opencode_monitor_v3_1.sh
+ExecStart=/path/to/opencode-railway-monitor/opencode_monitor_v4.sh
 Restart=always
 RestartSec=10
 
@@ -282,10 +277,10 @@ curl http://127.0.0.1:18080/session/{session_id}
 
 ```bash
 # 检查权限
-chmod +x opencode_monitor_v3_1.sh
+chmod +x opencode_monitor_v4.sh
 
 # 检查依赖
-which curl bc
+which curl bc jq python3
 
 # 检查 OpenCode 是否运行
 pgrep -f "opencode web"
@@ -317,7 +312,14 @@ echo $RAILWAY_ENVIRONMENT
 
 ## 📝 版本历史
 
-### v3.2 (当前版本)
+### v4.0 (当前版本) - 重大更新
+- ✨ **SSE事件流监控** - 实时检测活动（无延迟）
+- ✨ **混合架构** - SSE + 轮询双重保障
+- ✨ **无会话限制** - 检测所有100+会话
+- ✨ **更可靠的空闲检测** - 不遗漏活跃会话
+- ✨ 移除 `set -e` 防止脚本意外退出
+
+### v3.2
 - ✨ 每分钟检查一次（可配置）
 - ✨ 详细记录活跃 Session 信息（ID、时间、标题、目录）
 - ✨ 优化日志输出频率
