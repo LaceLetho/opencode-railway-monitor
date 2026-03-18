@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v3.2
-# 改进：1. 去掉线程数检测  2. 查询所有 session  3. 详细记录活跃session  4. 每分钟检查一次
+# OpenCode Railway 智能监测 - v3.3
+# 改进：1. 去掉线程数检测  2. 查询所有 session  3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃
 
 set -euo pipefail
 
@@ -22,19 +22,20 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 
 echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v3.2"
+echo "🚂 OpenCode Railway 智能监测 v3.3"
 echo "========================================"
 echo ""
 echo "改进:"
 echo "  ✓ 去掉线程数检测（MCP 可能一直开着）"
 echo "  ✓ 查询所有 session，不只是最新的"
 echo "  ✓ 更准确的空闲判断"
+echo "  ✓ 修复 pipefail 导致的崩溃"
 echo ""
 echo "配置:"
 echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
 echo "  内存阈值: ${MEMORY_THRESHOLD_MB} MB"
 echo "  CPU阈值: ${CPU_THRESHOLD_PERCENT}%"
-echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒 (约${CHECK_INTERVAL_SECONDS}秒)"
+echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒"
 echo "  日志文件: ${LOG_FILE}"
 echo "========================================"
 
@@ -50,13 +51,22 @@ get_opencode_pid() {
 
 # ==================== 获取所有 Session ID ====================
 get_all_session_ids() {
-    curl -s http://127.0.0.1:18080/session 2>/dev/null | grep -o '"id":"ses_[^"]*"' | cut -d'"' -f4
+    local response
+    response=$(curl -s http://127.0.0.1:18080/session 2>/dev/null || echo "")
+    if [ -z "$response" ]; then
+        echo ""
+        return
+    fi
+    # 使用 || true 防止 grep 无匹配时返回非零退出码导致脚本退出
+    echo "$response" | grep -o '"id":"ses_[^"]*"' 2>/dev/null | cut -d'"' -f4 || true
 }
 
 # ==================== 检查所有 Session 是否都空闲 ====================
 are_all_sessions_idle() {
-    local sessions=$(get_all_session_ids)
-    local current_time=$(date +%s)000
+    local sessions
+    sessions=$(get_all_session_ids)
+    local current_time
+    current_time=$(date +%s)000
     local threshold=$((IDLE_TIME_MINUTES * 60 * 1000))
     local active_count=0
     local total_count=0
@@ -66,11 +76,16 @@ are_all_sessions_idle() {
         [ -z "$session_id" ] && continue
         total_count=$((total_count + 1))
         
-        local detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null)
+        local detail
+        detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
         if [ -n "$detail" ]; then
-            local updated=$(echo "$detail" | grep -o '"updated":[0-9]*' | head -1 | cut -d':' -f2)
-            local title=$(echo "$detail" | grep -o '"title":"[^"]*"' | head -1 | cut -d'"' -f4)
-            local directory=$(echo "$detail" | grep -o '"directory":"[^"]*"' | head -1 | cut -d'"' -f4)
+            # 使用 || true 防止 grep 无匹配时返回非零退出码
+            local updated
+            updated=$(echo "$detail" | grep -o '"updated":[0-9]*' 2>/dev/null | head -1 | cut -d':' -f2 || echo "")
+            local title
+            title=$(echo "$detail" | grep -o '"title":"[^"]*"' 2>/dev/null | head -1 | cut -d'"' -f4 || echo "")
+            local directory
+            directory=$(echo "$detail" | grep -o '"directory":"[^"]*"' 2>/dev/null | head -1 | cut -d'"' -f4 || echo "")
             
             if [ -n "$updated" ]; then
                 local time_diff=$((current_time - updated))
@@ -102,22 +117,28 @@ are_all_sessions_idle() {
 
 # ==================== 检测是否正在生成内容 ====================
 is_generating_content() {
-    local pid=$(get_opencode_pid)
+    local pid
+    pid=$(get_opencode_pid)
     [ -z "$pid" ] && echo "NO_PID" && return 1
     
     local is_generating=0
     local reasons=""
     
     # 检测 1: 检查所有 session 的活跃状态
-    local sessions=$(get_all_session_ids)
-    local current_time=$(date +%s)000
+    local sessions
+    sessions=$(get_all_session_ids)
+    local current_time
+    current_time=$(date +%s)000
     
     while IFS= read -r session_id; do
         [ -z "$session_id" ] && continue
         
-        local detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null)
+        local detail
+        detail=$(curl -s "http://127.0.0.1:18080/session/$session_id" 2>/dev/null || echo "")
         if [ -n "$detail" ]; then
-            local updated=$(echo "$detail" | grep -o '"updated":[0-9]*' | head -1 | cut -d':' -f2)
+            # 使用 || true 防止 grep 无匹配时返回非零退出码
+            local updated
+            updated=$(echo "$detail" | grep -o '"updated":[0-9]*' 2>/dev/null | head -1 | cut -d':' -f2 || echo "")
             if [ -n "$updated" ]; then
                 local time_diff=$(( (current_time - updated) / 1000 ))
                 # 如果 15 秒内有更新，认为是正在生成
@@ -132,8 +153,10 @@ is_generating_content() {
     
     # 检测 2: 上下文切换速率
     if [ -f "/proc/$pid/status" ]; then
-        local current_ctx=$(grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}' | tr -d ' \n\t')
-        local prev_ctx=$(cat "$CONTEXT_SWITCH_FILE" 2>/dev/null | tr -d ' \n\t' || echo "0")
+        local current_ctx
+        current_ctx=$(grep "voluntary_ctxt_switches:" "/proc/$pid/status" 2>/dev/null | awk '{print $2}' | tr -d ' \n\t' || echo "0")
+        local prev_ctx
+        prev_ctx=$(cat "$CONTEXT_SWITCH_FILE" 2>/dev/null | tr -d ' \n\t' || echo "0")
         echo "$current_ctx" > "$CONTEXT_SWITCH_FILE"
         
         if [ "$prev_ctx" != "0" ] && [ -n "$current_ctx" ] && [ -n "$prev_ctx" ]; then
@@ -147,10 +170,11 @@ is_generating_content() {
     fi
     
     # 检测 3: 高 CPU（去掉线程数检测）
-    local cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
+    local cpu
+    cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
     # 使用 awk 进行浮点数比较，bc 可能不可用
-    # 注意：awk exit 会返回状态码，需要用 || true 避免 set -e 退出
     local cpu_high=1
+    # 使用 || true 防止 awk 返回非零退出码
     if awk "BEGIN {exit !($cpu > 25.0)}" 2>/dev/null; then
         cpu_high=0
     fi
@@ -162,8 +186,10 @@ is_generating_content() {
     
     # 检测 4: 冷却期
     if [ -f "$LAST_GENERATION_FILE" ]; then
-        local last_gen=$(cat "$LAST_GENERATION_FILE")
-        local current=$(date +%s)
+        local last_gen
+        last_gen=$(cat "$LAST_GENERATION_FILE")
+        local current
+        current=$(date +%s)
         local time_since_gen=$((current - last_gen))
         if [ "$time_since_gen" -lt "$GENERATION_GRACE_SECONDS" ]; then
             is_generating=1
@@ -182,17 +208,20 @@ is_generating_content() {
 
 # ==================== 获取内存使用 ====================
 get_memory_mb() {
-    local pid=$(get_opencode_pid)
+    local pid
+    pid=$(get_opencode_pid)
     [ -z "$pid" ] && echo "0" && return
     
     local total_kb=0
     
     if [ -f "/proc/$pid/status" ]; then
-        local main_mem=$(grep VmRSS "/proc/$pid/status" 2>/dev/null | awk '{print $2}')
+        local main_mem
+        main_mem=$(grep VmRSS "/proc/$pid/status" 2>/dev/null | awk '{print $2}' || echo "0")
         total_kb=$((total_kb + main_mem))
     fi
     
-    local other_mem=$(ps aux | grep -E 'playwright-mcp|mcp-remote|language-server|tsserver' | grep -v grep | awk '{sum+=$6} END {print sum}' || echo 0)
+    local other_mem
+    other_mem=$(ps aux | grep -E 'playwright-mcp|mcp-remote|language-server|tsserver' | grep -v grep | awk '{sum+=$6} END {print sum}' || echo 0)
     total_kb=$((total_kb + other_mem))
     
     echo $((total_kb / 1024))
@@ -201,7 +230,8 @@ get_memory_mb() {
 # ==================== 重启 ====================
 restart_opencode() {
     local reason="$1"
-    local mem_before=$(get_memory_mb)
+    local mem_before
+    mem_before=$(get_memory_mb)
     
     log "========================================"
     log "🔄 重启 OpenCode"
@@ -211,7 +241,8 @@ restart_opencode() {
     rm -f "$LAST_GENERATION_FILE" "$CONTEXT_SWITCH_FILE"
     
     local wrapper_pid=1
-    local opencode_pid=$(get_opencode_pid)
+    local opencode_pid
+    opencode_pid=$(get_opencode_pid)
     
     log "  优雅关闭..."
     if [ -n "$opencode_pid" ]; then
@@ -235,29 +266,33 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v3.2"
+    log "🚀 监测服务启动 v3.3"
     
-    local start_time=$(date +%s)
+    local start_time
+    start_time=$(date +%s)
     local consecutive_checks=0
     local check_count=0
     
     # 初始化
-    local pid=$(get_opencode_pid)
+    local pid
+    pid=$(get_opencode_pid)
     if [ -n "$pid" ] && [ -f "/proc/$pid/status" ]; then
-        grep "voluntary_ctxt_switches:" "/proc/$pid/status" | awk '{print $2}' | tr -d ' \n\t' > "$CONTEXT_SWITCH_FILE"
+        grep "voluntary_ctxt_switches:" "/proc/$pid/status" 2>/dev/null | awk '{print $2}' | tr -d ' \n\t' > "$CONTEXT_SWITCH_FILE" || true
     fi
     
     while true; do
         check_count=$((check_count + 1))
         
-        local pid=$(get_opencode_pid)
+        pid=$(get_opencode_pid)
         if [ -z "$pid" ]; then
-            sleep $CHECK_INTERVAL_SECONDS
+            sleep "$CHECK_INTERVAL_SECONDS"
             continue
         fi
         
-        local current_mem=$(get_memory_mb)
-        local uptime=$(($(date +%s) - start_time))
+        local current_mem
+        current_mem=$(get_memory_mb)
+        local uptime
+        uptime=$(($(date +%s) - start_time))
         local uptime_hours=$((uptime / 3600))
         
         # 显示所有 session 状态（每5次检查显示一次，即每5分钟）
@@ -267,9 +302,12 @@ main() {
         fi
         
         # 检查生成状态
-        local gen_status=$(is_generating_content)
-        local gen_state=$(echo "$gen_status" | cut -d'|' -f1)
-        local gen_info=$(echo "$gen_status" | cut -d'|' -f2-)
+        local gen_status
+        gen_status=$(is_generating_content)
+        local gen_state
+        gen_state=$(echo "$gen_status" | cut -d'|' -f1)
+        local gen_info
+        gen_info=$(echo "$gen_status" | cut -d'|' -f2-)
         
         # 如果正在生成，重置计数
         if [ "$gen_state" = "GENERATING" ]; then
@@ -277,7 +315,7 @@ main() {
                 log "  📝 生成中: $gen_info"
             fi
             consecutive_checks=0
-            sleep $CHECK_INTERVAL_SECONDS
+            sleep "$CHECK_INTERVAL_SECONDS"
             continue
         fi
         
@@ -287,7 +325,7 @@ main() {
             local idle_min=$((consecutive_checks * CHECK_INTERVAL_SECONDS / 60))
             
             # 只有所有 session 空闲 AND 内存超过 2GB 时才重启
-            if [ $idle_min -ge $IDLE_TIME_MINUTES ] && [ "$current_mem" -gt 2000 ]; then
+            if [ $idle_min -ge "$IDLE_TIME_MINUTES" ] && [ "$current_mem" -gt 2000 ]; then
                 log "💤 所有 Session 空闲 ${IDLE_TIME_MINUTES} 分钟 且 内存占用 ${current_mem}MB > 2GB，执行重启"
                 restart_opencode "空闲且高内存"
             elif [ $((check_count % 5)) -eq 0 ]; then
@@ -301,7 +339,7 @@ main() {
             consecutive_checks=0
         fi
         
-        sleep $CHECK_INTERVAL_SECONDS
+        sleep "$CHECK_INTERVAL_SECONDS"
     done
 }
 
