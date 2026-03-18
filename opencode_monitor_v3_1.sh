@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v3.4
-# 改进：1. 去掉线程数检测  2. 查询最近10个 session  3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时
+# OpenCode Railway 智能监测 - v3.5
+# 改进：1. 去掉线程数检测  2. 查询最近10个 session（优化性能） 3. 详细记录活跃session  4. 每分钟检查一次  5. 修复pipefail导致的崩溃  6. 添加curl超时
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 
 echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v3.4"
+echo "🚂 OpenCode Railway 智能监测 v3.5"
 echo "========================================"
 echo ""
 echo "改进:"
@@ -270,7 +270,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v3.4"
+    log "🚀 监测服务启动 v3.5"
     
     local start_time
     start_time=$(date +%s)
