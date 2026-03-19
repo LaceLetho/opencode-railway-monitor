@@ -26,6 +26,13 @@ RAILWAY_SERVICE_ID="${RAILWAY_SERVICE_ID:-04480a22-64b6-4c9d-9815-691aeea0a228}"
 
 API_URL="http://127.0.0.1:18080"
 
+log() {
+    local msg="$1"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $msg" | tee -a "$LOG_FILE"
+}
+
 echo "========================================"
 echo "🚂 OpenCode Railway 智能监测 v4.1"
 echo "========================================"
