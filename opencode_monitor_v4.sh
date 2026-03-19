@@ -24,29 +24,66 @@ RAILWAY_PROJECT_ID="${RAILWAY_PROJECT_ID:-86df633b-79e2-4679-8b70-209e000fc6b6}"
 RAILWAY_ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-866a8008-85c1-420f-8b5c-eb8b628c747c}"
 RAILWAY_SERVICE_ID="${RAILWAY_SERVICE_ID:-04480a22-64b6-4c9d-9815-691aeea0a228}"
 
-API_URL="http://127.0.0.1:18080"
+get_current_deployment_id() {
+    local graphql_query='{"query": "query deployments($input: DeploymentListInput!) { deployments(input: $input, first: 1) { edges { node { id status } } } }", "variables": { "input": { "projectId": "'"$RAILWAY_PROJECT_ID"'", "serviceId": "'"$RAILWAY_SERVICE_ID"'", "environmentId": "'"$RAILWAY_ENVIRONMENT_ID"'" } } }'
+    
+    local response
+    response=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
+        -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$graphql_query" 2>&1)
+    
+    # Extract deployment ID from response
+    local deployment_id=$(echo "$response" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"$//')
+    
+    if [ -n "$deployment_id" ]; then
+        echo "$deployment_id"
+        return 0
+    else
+        return 1
+    fi
+}
 
-echo "========================================"
-echo "🚂 OpenCode Railway 智能监测 v4.0"
-echo "========================================"
-echo ""
-echo "重大改进:"
-echo "  ✓ 使用SSE事件流 - 实时检测活动"
-echo "  ✓ 集成Railway API - 自动重新部署"
-echo ""
-echo "配置:"
-echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
-echo "  内存阈值: ${MEMORY_THRESHOLD_MB} MB"
-echo "  CPU阈值: ${CPU_THRESHOLD_PERCENT}%"
-echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒"
-echo "  日志文件: ${LOG_FILE}"
-echo "  Railway API: $([ -n "$RAILWAY_API_TOKEN" ] && echo "已配置" || echo "未配置")"
-echo "========================================"
-
-log() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-    echo "$msg"
-    echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
+trigger_deployment_restart() {
+    log "  🚀 调用Railway API重启当前部署..."
+    
+    if [ -z "$RAILWAY_API_TOKEN" ]; then
+        log "  ⚠️ 未设置 RAILWAY_API_TOKEN，跳过API重启"
+        log "     请设置环境变量: RAILWAY_API_TOKEN"
+        return 1
+    fi
+    
+    # Get current deployment ID
+    local deployment_id
+    deployment_id=$(get_current_deployment_id)
+    
+    if [ -z "$deployment_id" ]; then
+        log "  ⚠️ 无法获取当前部署ID，尝试重新部署..."
+        trigger_railway_redeploy
+        return $?
+    fi
+    
+    log "  📦 当前部署ID: $deployment_id"
+    
+    local graphql_query='{"query": "mutation deploymentRestart($id: String!) { deploymentRestart(id: $id) }", "variables": { "id": "'"$deployment_id"'" } }'
+    
+    local response
+    response=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
+        -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$graphql_query" 2>&1)
+    
+    local http_code=$?
+    
+    if [ $http_code -eq 0 ] && echo "$response" | grep -q "deploymentRestart"; then
+        log "  ✅ Railway部署重启已触发"
+        return 0
+    else
+        log "  ⚠️ Railway API调用失败: $response"
+        log "  🔄 尝试重新部署..."
+        trigger_railway_redeploy
+        return $?
+    fi
 }
 
 trigger_railway_redeploy() {
@@ -77,6 +114,11 @@ trigger_railway_redeploy() {
     fi
 }
 
+# ==================== 获取OpenCode进程ID ====================
+get_opencode_pid() {
+    pgrep -f "/\.opencode web" | head -1
+}
+
 # ==================== 方法1: SSE事件流监控 ====================
 start_event_monitor() {
     log "🔄 启动SSE事件流监控..."
@@ -87,7 +129,7 @@ start_event_monitor() {
             log "  [SSE] 连接到事件流..."
             
             # 连接到SSE端点，捕获活动事件
-            curl -N -s "${API_URL}/event" 2>/dev/null | while read -r line; do
+            curl -N -s "${API_URL}/global/event" 2>/dev/null | while read -r line; do
                 # 只检测真正的用户活动事件，过滤系统心跳
                 if echo "$line" | grep -qE "data:"; then
                     # 过滤掉系统心跳和连接事件
@@ -214,10 +256,10 @@ restart_opencode() {
     
     rm -f "$LAST_GENERATION_FILE" "$CONTEXT_SWITCH_FILE" "$LAST_ACTIVITY_FILE"
     
-    # 直接调用 Railway API 触发重新部署
-    trigger_railway_redeploy
+    # 直接调用 Railway API 触发部署重启
+    trigger_deployment_restart
     
-    log "  ✅ 重新部署请求已发送"
+    log "  ✅ 部署重启请求已发送"
     log "========================================"
     
     # 继续监控，等待 Railway 重新部署容器
