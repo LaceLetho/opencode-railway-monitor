@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenCode Railway 智能监测 - v4.0 (SSE Only)
-# 改进：使用SSE事件流作为唯一检测器
+# OpenCode Railway 智能监测 - v4.1 (Global SSE)
+# 改进：使用 /global/event SSE 端点检测全局活动，修复进程 PID 匹配
 
 set -uo pipefail
 
@@ -23,6 +23,26 @@ RAILWAY_API_TOKEN="${RAILWAY_API_TOKEN:-}"
 RAILWAY_PROJECT_ID="${RAILWAY_PROJECT_ID:-86df633b-79e2-4679-8b70-209e000fc6b6}"
 RAILWAY_ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-866a8008-85c1-420f-8b5c-eb8b628c747c}"
 RAILWAY_SERVICE_ID="${RAILWAY_SERVICE_ID:-04480a22-64b6-4c9d-9815-691aeea0a228}"
+
+API_URL="http://127.0.0.1:18080"
+
+echo "========================================"
+echo "🚂 OpenCode Railway 智能监测 v4.1"
+echo "========================================"
+echo ""
+echo "重大改进:"
+echo "  ✓ 使用 /global/event SSE - 检测全局活动"
+echo "  ✓ 修复 PID 匹配 - 正确识别工作进程"
+echo "  ✓ 集成Railway API - 自动重新部署"
+echo ""
+echo "配置:"
+echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
+echo "  内存阈值: ${MEMORY_THRESHOLD_MB} MB"
+echo "  CPU阈值: ${CPU_THRESHOLD_PERCENT}%"
+echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒"
+echo "  日志文件: ${LOG_FILE}"
+echo "  Railway API: $([ -n "$RAILWAY_API_TOKEN" ] && echo "已配置" || echo "未配置")"
+echo "========================================"
 
 get_current_deployment_id() {
     local graphql_query='{"query": "query deployments($input: DeploymentListInput!) { deployments(input: $input, first: 1) { edges { node { id status } } } }", "variables": { "input": { "projectId": "'"$RAILWAY_PROJECT_ID"'", "serviceId": "'"$RAILWAY_SERVICE_ID"'", "environmentId": "'"$RAILWAY_ENVIRONMENT_ID"'" } } }'
@@ -268,7 +288,7 @@ restart_opencode() {
 
 # ==================== 主循环 ====================
 main() {
-    log "🚀 监测服务启动 v4.0 (SSE 模式)"
+    log "🚀 监测服务启动 v4.1 (Global SSE 模式)"
     
     local start_time
     start_time=$(date +%s)
