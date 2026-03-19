@@ -163,22 +163,8 @@ is_generating_content() {
 
 # ==================== 获取内存使用 ====================
 get_memory_mb() {
-    local pid
-    pid=$(get_opencode_pid)
-    [ -z "$pid" ] && echo "0" && return
-    
-    local total_kb=0
-    
-    if [ -f "/proc/$pid/status" ]; then
-        local main_mem
-        main_mem=$(grep VmRSS "/proc/$pid/status" 2>/dev/null | awk '{print $2}' || echo "0")
-        total_kb=$((total_kb + main_mem))
-    fi
-    
-    local other_mem
-    other_mem=$(ps aux | grep -E 'playwright-mcp|mcp-remote|language-server|tsserver' | grep -v grep | awk '{sum+=$6} END {print sum}' || echo 0)
-    total_kb=$((total_kb + other_mem))
-    
+    # 统计所有用户进程的 RSS 总和
+    local total_kb=$(ps aux | awk 'NR>1 {sum+=$6} END {print sum}' 2>/dev/null || echo 0)
     echo $((total_kb / 1024))
 }
 
