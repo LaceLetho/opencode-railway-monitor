@@ -19,6 +19,11 @@ LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
 CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 EVENT_MONITOR_PID_FILE="$STATE_DIR/event_monitor.pid"
 
+RAILWAY_API_TOKEN="${RAILWAY_API_TOKEN:-}"
+RAILWAY_PROJECT_ID="${RAILWAY_PROJECT_ID:-86df633b-79e2-4679-8b70-209e000fc6b6}"
+RAILWAY_ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-866a8008-85c1-420f-8b5c-eb8b628c747c}"
+RAILWAY_SERVICE_ID="${RAILWAY_SERVICE_ID:-04480a22-64b6-4c9d-9815-691aeea0a228}"
+
 API_URL="http://127.0.0.1:18080"
 
 echo "========================================"
@@ -27,6 +32,7 @@ echo "========================================"
 echo ""
 echo "重大改进:"
 echo "  ✓ 使用SSE事件流 - 实时检测活动"
+echo "  ✓ 集成Railway API - 自动重新部署"
 echo ""
 echo "配置:"
 echo "  空闲时间: ${IDLE_TIME_MINUTES} 分钟"
@@ -34,6 +40,7 @@ echo "  内存阈值: ${MEMORY_THRESHOLD_MB} MB"
 echo "  CPU阈值: ${CPU_THRESHOLD_PERCENT}%"
 echo "  检查间隔: ${CHECK_INTERVAL_SECONDS} 秒"
 echo "  日志文件: ${LOG_FILE}"
+echo "  Railway API: $([ -n "$RAILWAY_API_TOKEN" ] && echo "已配置" || echo "未配置")"
 echo "========================================"
 
 log() {
@@ -42,8 +49,32 @@ log() {
     echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
 }
 
-get_opencode_pid() {
-    pgrep -f "opencode web" | head -1 || echo ""
+trigger_railway_redeploy() {
+    log "  🚀 调用Railway API触发重新部署..."
+    
+    if [ -z "$RAILWAY_API_TOKEN" ]; then
+        log "  ⚠️ 未设置 RAILWAY_API_TOKEN，跳过API部署"
+        log "     请设置环境变量: RAILWAY_API_TOKEN"
+        return 1
+    fi
+    
+    local graphql_query='{"query": "mutation environmentTriggersDeploy($input: EnvironmentTriggersDeployInput!) { environmentTriggersDeploy(input: $input) }", "variables": { "input": { "projectId": "'"$RAILWAY_PROJECT_ID"'", "environmentId": "'"$RAILWAY_ENVIRONMENT_ID"'", "serviceId": "'"$RAILWAY_SERVICE_ID"'" } } }'
+    
+    local response
+    response=$(curl -s -X POST https://backboard.railway.com/graphql/v2 \
+        -H "Authorization: Bearer $RAILWAY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$graphql_query" 2>&1)
+    
+    local http_code=$?
+    
+    if [ $http_code -eq 0 ] && echo "$response" | grep -q "environmentTriggersDeploy"; then
+        log "  ✅ Railway重新部署已触发"
+        return 0
+    else
+        log "  ⚠️ Railway API调用失败: $response"
+        return 1
+    fi
 }
 
 # ==================== 方法1: SSE事件流监控 ====================
@@ -175,36 +206,22 @@ restart_opencode() {
     mem_before=$(get_memory_mb)
     
     log "========================================"
-    log "🔄 重启 OpenCode"
+    log "🔄 触发 OpenCode 重新部署"
     log "  原因: $reason"
-    log "  重启前内存: ${mem_before}MB"
+    log "  当前内存: ${mem_before}MB"
     
     stop_event_monitor
     
     rm -f "$LAST_GENERATION_FILE" "$CONTEXT_SWITCH_FILE" "$LAST_ACTIVITY_FILE"
     
-    local wrapper_pid=1
-    local opencode_pid
-    opencode_pid=$(get_opencode_pid)
+    # 直接调用 Railway API 触发重新部署
+    trigger_railway_redeploy
     
-    log "  优雅关闭..."
-    if [ -n "$opencode_pid" ]; then
-        kill -TERM "$opencode_pid" 2>/dev/null || true
-    fi
+    log "  ✅ 重新部署请求已发送"
+    log "========================================"
     
-    sleep 5
-    
-    if pgrep -f "opencode web" > /dev/null 2>&1; then
-        log "  强制终止..."
-        killall -9 opencode 2>/dev/null || true
-        killall -9 bun 2>/dev/null || true
-    fi
-    
-    killall -9 node 2>/dev/null || true
-    
-    log "  触发重新部署..."
-    kill -9 $wrapper_pid 2>/dev/null || true
-    exit 0
+    # 继续监控，等待 Railway 重新部署容器
+    sleep 60
 }
 
 # ==================== 主循环 ====================
