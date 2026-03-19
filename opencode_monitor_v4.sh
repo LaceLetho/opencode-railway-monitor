@@ -280,8 +280,8 @@ main() {
             local current=$(date +%s)
             local idle_time=$(( (current - last_activity) / 60 ))
             
-            if [ $idle_time -ge "$IDLE_TIME_MINUTES" ] && [ "$current_mem" -gt 2000 ]; then
-                log "💤 空闲 ${IDLE_TIME_MINUTES} 分钟且内存占用 ${current_mem}MB > 2GB，执行重启"
+            if [ $idle_time -ge "$IDLE_TIME_MINUTES" ] && [ "$current_mem" -gt "$MEMORY_THRESHOLD_MB" ]; then
+                log "💤 空闲 ${IDLE_TIME_MINUTES} 分钟且内存占用 ${current_mem}MB > ${MEMORY_THRESHOLD_MB}MB，执行重启"
                 restart_opencode "空闲且高内存"
             elif [ $((check_count % 5)) -eq 0 ]; then
                 log "  🟢 全部空闲 (${idle_time}/${IDLE_TIME_MINUTES} 分钟), 内存: ${current_mem}MB"
