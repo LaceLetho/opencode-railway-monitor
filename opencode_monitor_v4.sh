@@ -16,7 +16,6 @@ mkdir -p "$STATE_DIR"
 
 LAST_ACTIVITY_FILE="$STATE_DIR/last_activity"
 LAST_GENERATION_FILE="$STATE_DIR/last_generation_time"
-CONTEXT_SWITCH_FILE="$STATE_DIR/last_context_switches"
 EVENT_MONITOR_PID_FILE="$STATE_DIR/event_monitor.pid"
 
 RAILWAY_API_TOKEN="${RAILWAY_API_TOKEN:-}"
@@ -212,34 +211,7 @@ is_generating_content() {
         fi
     fi
     
-    # 检测 2: 上下文切换速率
-    if [ -f "/proc/$pid/status" ]; then
-        local current_ctx
-        current_ctx=$(grep "voluntary_ctxt_switches:" "/proc/$pid/status" 2>/dev/null | awk '{print $2}' | tr -d ' \n\t' || echo "0")
-        local prev_ctx
-        prev_ctx=$(cat "$CONTEXT_SWITCH_FILE" 2>/dev/null | tr -d ' \n\t' || echo "0")
-        echo "$current_ctx" > "$CONTEXT_SWITCH_FILE"
-        
-        if [ "$prev_ctx" != "0" ] && [ -n "$current_ctx" ] && [ -n "$prev_ctx" ]; then
-            local ctx_diff=$((current_ctx - prev_ctx))
-            if [ "$ctx_diff" -gt 100 ]; then
-                is_generating=1
-                reasons="${reasons}上下文切换(${ctx_diff}) "
-                date +%s > "$LAST_GENERATION_FILE"
-            fi
-        fi
-    fi
-    
-    # 检测 3: 高 CPU
-    local cpu
-    cpu=$(ps -p "$pid" -o %cpu= 2>/dev/null | tr -d ' ' || echo "0")
-    if awk "BEGIN {exit !($cpu > 25.0)}" 2>/dev/null; then
-        is_generating=1
-        reasons="${reasons}高CPU(${cpu}%) "
-        date +%s > "$LAST_GENERATION_FILE"
-    fi
-    
-    # 检测 4: 冷却期
+    # 检测 2: 冷却期
     if [ -f "$LAST_GENERATION_FILE" ]; then
         local last_gen
         last_gen=$(cat "$LAST_GENERATION_FILE")
@@ -256,7 +228,7 @@ is_generating_content() {
         echo "GENERATING|$reasons"
         return 0
     else
-        echo "IDLE|CPU:${cpu}%"
+        echo "IDLE"
         return 1
     fi
 }
@@ -281,7 +253,7 @@ restart_opencode() {
     
     stop_event_monitor
     
-    rm -f "$LAST_GENERATION_FILE" "$CONTEXT_SWITCH_FILE" "$LAST_ACTIVITY_FILE"
+    rm -f "$LAST_GENERATION_FILE" "$LAST_ACTIVITY_FILE"
     
     # 直接调用 Railway API 触发部署重启
     trigger_deployment_restart
@@ -301,13 +273,6 @@ main() {
     start_time=$(date +%s)
     local consecutive_checks=0
     local check_count=0
-    
-    # 初始化
-    local pid
-    pid=$(get_opencode_pid)
-    if [ -n "$pid" ] && [ -f "/proc/$pid/status" ]; then
-        grep "voluntary_ctxt_switches:" "/proc/$pid/status" 2>/dev/null | awk '{print $2}' | tr -d ' \n\t' > "$CONTEXT_SWITCH_FILE" || true
-    fi
     
     # 初始化活动时间
     date +%s > "$LAST_ACTIVITY_FILE"
